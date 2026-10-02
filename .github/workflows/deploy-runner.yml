@@ -1,0 +1,99 @@
+name: Deploy and Configure Runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_WORKING_DIR: .
+  ANSIBLE_WORKING_DIR: ./ansible-repo
+  RG_NAME: rg-runner-appbaq
+  NSG_NAME: nsg-runner
+
+jobs:
+  provision-and-configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Terraform repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout Ansible repository
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: thomas-enj/runner-appbaq-ansible
+          path: ansible-repo
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var="admin_ip=${{ secrets.MY_ADMIN_IP }}"
+
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        run: |
+          echo "RUNNER_IP=$(terraform output -raw runner_public_ip)" >> $GITHUB_ENV
+          terraform output -raw runner_ssh_private_key > runner_key.pem
+          chmod 600 runner_key.pem
+
+      - name: Get GitHub Actions IP
+        run: |
+          ACTION_IP=$(curl -s https://api.ipify.org)
+          echo "ACTION_IP=$ACTION_IP" >> $GITHUB_ENV
+
+      - name: Open Temporary Firewall Rule
+        run: |
+          az network nsg rule create \
+            --resource-group ${{ env.RG_NAME }} \
+            --nsg-name ${{ env.NSG_NAME }} \
+            --name Allow-GitHub-Actions \
+            --priority 110 \
+            --direction Inbound \
+            --access Allow \
+            --protocol Tcp \
+            --source-port-range "*" \
+            --destination-port-range 22 \
+            --source-address-prefix ${{ env.ACTION_IP }}/32 \
+            --destination-address-prefix "*"
+
+      - name: Generate GitHub Runner Registration Token
+        run: |
+          TOKEN=$(curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PAT_GITHUB }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/thomas-enj/appbaq-infra-terraform/actions/runners/registration-token | jq -r .token)
+          echo "RUNNER_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+      - name: Trust Runner SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.RUNNER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Run Ansible Playbook
+        run: |
+          ansible-playbook -i "${{ env.RUNNER_IP }}," playbook.yml \
+            -u azureuser --private-key ../runner_key.pem \
+            -e "runner_setup_github_token=${{ env.RUNNER_TOKEN }}"
+        working-directory: ${{ env.ANSIBLE_WORKING_DIR }}
+
+      - name: Close Temporary Firewall Rule
+        if: always()
+        run: |
+          az network nsg rule delete \
+            --resource-group ${{ env.RG_NAME }} \
+            --nsg-name ${{ env.NSG_NAME }} \
+            --name Allow-GitHub-Actions \
+            --yes
