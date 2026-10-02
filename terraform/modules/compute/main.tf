@@ -1,3 +1,16 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 5.8.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = ">= 4.4.1"
+    }
+  }
+}
+
 resource "tls_private_key" "runner_ssh_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -25,6 +38,6 @@ resource "azurerm_linux_virtual_machine" "runner_vm" {
     publisher = "Canonical"
     offer     = "0001-com-ubuntu-server-jammy"
     sku       = "22_04-lts-gen2"
-    version   = "latest"
+    version   = "22.04.202608060"
   }
 }

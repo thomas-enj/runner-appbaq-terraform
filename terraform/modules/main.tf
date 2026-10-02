@@ -1,18 +1,21 @@
 terraform {
+  required_version = ">= 1.16.4, < 1.17.0"
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
+      version = "= 5.8.0"
     }
     tls = {
       source  = "hashicorp/tls"
-      version = "~> 4.0"
+      version = "= 4.4.1"
     }
   }
 }
 
 provider "azurerm" {
   features {}
+  resource_providers_to_register = ["Microsoft.Compute", "Microsoft.Network"]
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -28,7 +31,7 @@ resource "azurerm_virtual_network" "vnet" {
 }
 
 module "network" {
-  source              = "./modules/network"
+  source              = "./network"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   vnet_name           = azurerm_virtual_network.vnet.name
@@ -36,7 +39,7 @@ module "network" {
 }
 
 module "compute" {
-  source              = "./modules/compute"
+  source              = "./compute"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   nic_id              = module.network.nic_id

@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 5.8.0"
+    }
+  }
+}
+
 resource "azurerm_subnet" "runner_subnet" {
   name                 = "snet-runner"
   resource_group_name  = var.resource_group_name
@@ -10,6 +19,7 @@ resource "azurerm_public_ip" "runner_pip" {
   location            = var.location
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
+  sku                 = "Standard"
 }
 
 resource "azurerm_network_security_group" "runner_nsg" {
