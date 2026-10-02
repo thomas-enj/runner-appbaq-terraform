@@ -11,6 +11,7 @@ env:
   TF_WORKING_DIR: ./terraform
   ANSIBLE_WORKING_DIR: ./ansible-repo
   RG_NAME: ${{ vars.TF_RGROUP }}
+  SA_BACKEND: ${{ vars.TF_SA_BACKEND }}
   TF_VAR_resource_group_name: ${{ vars.TF_RGROUP }}
   TF_VAR_owner: ${{ vars.TF_OWNER }}
   OWNER: ${{ vars.TF_OWNER }}
@@ -27,8 +28,8 @@ jobs:
       - name: Validate GitHub variables
         shell: bash
         run: |
-          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" ]]; then
-            echo "::error::Define the GitHub repository variables TF_RGROUP and TF_OWNER."
+          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" ]]; then
+            echo "::error::Define the GitHub repository variables TF_RGROUP, TF_OWNER and TF_SA_BACKEND."
             exit 1
           fi
 
@@ -55,7 +56,15 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform Init
-        run: bash "$GITHUB_WORKSPACE/deploy-remote-state-storage.sh"
+        run: |
+          terraform init \
+            -input=false \
+            -reconfigure \
+            -backend-config="resource_group_name=${RG_NAME}" \
+            -backend-config="storage_account_name=${SA_BACKEND}" \
+            -backend-config="container_name=tfstate-appbaq" \
+            -backend-config="key=${OWNER}.runner.terraform.tfstate" \
+            -backend-config="use_azuread_auth=true"
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Validate
