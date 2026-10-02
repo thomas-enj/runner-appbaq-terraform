@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  TF_WORKING_DIR: .
+  TF_WORKING_DIR: ./terraform
   ANSIBLE_WORKING_DIR: ./ansible-repo
   RG_NAME: ${{ vars.TF_RGROUP }}
   TF_VAR_resource_group_name: ${{ vars.TF_RGROUP }}
@@ -96,7 +96,7 @@ jobs:
       - name: Run Ansible Playbook
         run: |
           ansible-playbook -i "${{ env.RUNNER_IP }}," playbook.yml \
-            -u azureuser --private-key ../runner_key.pem \
+            -u azureuser --private-key ${{ github.workspace }}/terraform/runner_key.pem \
             -e "runner_setup_github_token=${{ env.RUNNER_TOKEN }}"
         working-directory: ${{ env.ANSIBLE_WORKING_DIR }}
 
