@@ -10,13 +10,24 @@ permissions:
 env:
   TF_WORKING_DIR: .
   ANSIBLE_WORKING_DIR: ./ansible-repo
-  RG_NAME: rg-runner-appbaq
+  RG_NAME: ${{ vars.TF_RGROUP }}
+  TF_VAR_resource_group_name: ${{ vars.TF_RGROUP }}
+  TF_VAR_owner: ${{ vars.TF_OWNER }}
+  OWNER: ${{ vars.TF_OWNER }}
   NSG_NAME: nsg-runner
 
 jobs:
   provision-and-configure:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate GitHub variables
+        shell: bash
+        run: |
+          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" ]]; then
+            echo "::error::Define the GitHub repository variables TF_RGROUP and TF_OWNER."
+            exit 1
+          fi
+
       - name: Checkout Terraform repository
         uses: actions/checkout@v7.0.1
 
@@ -57,7 +68,7 @@ jobs:
       - name: Open Temporary Firewall Rule
         run: |
           az network nsg rule create \
-            --resource-group ${{ env.RG_NAME }} \
+            --resource-group "$RG_NAME" \
             --nsg-name ${{ env.NSG_NAME }} \
             --name Allow-GitHub-Actions \
             --priority 110 \
@@ -93,6 +104,6 @@ jobs:
         if: always()
         run: |
           az network nsg rule delete \
-            --resource-group ${{ env.RG_NAME }} \
+            --resource-group "$RG_NAME" \
             --nsg-name ${{ env.NSG_NAME }} \
             --name Allow-GitHub-Actions

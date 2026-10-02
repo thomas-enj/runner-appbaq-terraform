@@ -1,6 +1,5 @@
 variable "resource_group_name" {
   type        = string
-  default     = "rg-runner-appbaq"
   description = "Name of the resource group"
 }
 
