@@ -11,11 +11,6 @@ on:
         options:
           - deploy
           - destroy
-      confirm_destroy:
-        description: "Confirm destruction of the runner infrastructure"
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: runner-terraform-${{ vars.TF_OWNER }}
@@ -156,15 +151,9 @@ jobs:
     env:
       TF_VAR_admin_ip: ${{ secrets.MY_ADMIN_IP }}
     steps:
-      - name: Validate destruction request
+      - name: Validate GitHub variables
         shell: bash
-        env:
-          CONFIRM_DESTROY: ${{ inputs.confirm_destroy }}
         run: |
-          if [[ "$CONFIRM_DESTROY" != "true" ]]; then
-            echo "::error::Enable confirm_destroy to destroy the runner infrastructure."
-            exit 1
-          fi
           if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
             echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
             exit 1
