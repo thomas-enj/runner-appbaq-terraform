@@ -2,6 +2,24 @@ name: Deploy and Configure Runner
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: "Operation to perform"
+        type: choice
+        required: true
+        default: deploy
+        options:
+          - deploy
+          - destroy
+      confirm_destroy:
+        description: "Confirm destruction of the runner infrastructure"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: runner-terraform-${{ vars.TF_OWNER }}
+  cancel-in-progress: false
 
 permissions:
   id-token: write
@@ -23,6 +41,7 @@ env:
 
 jobs:
   provision-and-configure:
+    if: ${{ inputs.action == 'deploy' }}
     runs-on: ubuntu-latest
     steps:
       - name: Validate GitHub variables
@@ -130,3 +149,58 @@ jobs:
             --resource-group "$RG_NAME" \
             --nsg-name ${{ env.NSG_NAME }} \
             --name Allow-GitHub-Actions
+
+  destroy:
+    if: ${{ inputs.action == 'destroy' }}
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_admin_ip: ${{ secrets.MY_ADMIN_IP }}
+    steps:
+      - name: Validate destruction request
+        shell: bash
+        env:
+          CONFIRM_DESTROY: ${{ inputs.confirm_destroy }}
+        run: |
+          if [[ "$CONFIRM_DESTROY" != "true" ]]; then
+            echo "::error::Enable confirm_destroy to destroy the runner infrastructure."
+            exit 1
+          fi
+          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
+            echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
+            exit 1
+          fi
+
+      - name: Checkout Terraform repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -input=false \
+            -backend-config="resource_group_name=${RG_NAME}" \
+            -backend-config="storage_account_name=${SA_BACKEND}" \
+            -backend-config="container_name=tfstate-appbaq" \
+            -backend-config="key=${OWNER}.runner.terraform.tfstate" \
+            -backend-config="use_azuread_auth=true"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Destroy
+        run: terraform destroy -input=false -auto-approve
+        working-directory: ${{ env.TF_WORKING_DIR }}
