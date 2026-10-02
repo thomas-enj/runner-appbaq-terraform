@@ -29,24 +29,30 @@ locals {
   )
 }
 
-resource "azurerm_resource_group" "rg" {
-  name     = var.resource_group_name
-  location = var.location
-  tags     = local.tags
+removed {
+  from = azurerm_resource_group.rg
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+data "azurerm_resource_group" "rg" {
+  name = var.resource_group_name
 }
 
 resource "azurerm_virtual_network" "vnet" {
   name                = var.vnet_name
   address_space       = ["10.0.0.0/16"]
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
   tags                = local.tags
 }
 
 module "network" {
   source              = "./modules/network"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
   vnet_name           = azurerm_virtual_network.vnet.name
   admin_ip            = var.admin_ip
   tags                = local.tags
@@ -54,8 +60,8 @@ module "network" {
 
 module "compute" {
   source              = "./modules/compute"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
   nic_id              = module.network.nic_id
   vm_size             = var.vm_size
   tags                = local.tags
