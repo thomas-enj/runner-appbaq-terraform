@@ -44,7 +44,7 @@ resource "azurerm_virtual_network" "vnet" {
 }
 
 module "network" {
-  source              = "./network"
+  source              = "./modules/network"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   vnet_name           = azurerm_virtual_network.vnet.name
@@ -53,7 +53,7 @@ module "network" {
 }
 
 module "compute" {
-  source              = "./compute"
+  source              = "./modules/compute"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   nic_id              = module.network.nic_id

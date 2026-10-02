@@ -8,7 +8,7 @@ export LOCATION="${LOCATION:-francecentral}"
 export CONTAINER_BACKEND="${CONTAINER_BACKEND:-tfstate-appbaq}"
 STATE_KEY="${OWNER}.runner.terraform.tfstate"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-TF_ROOT="${SCRIPT_DIR}/terraform/modules"
+TF_ROOT="${SCRIPT_DIR}/terraform"
 
 command -v az >/dev/null
 command -v terraform >/dev/null
