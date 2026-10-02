@@ -95,5 +95,4 @@ jobs:
           az network nsg rule delete \
             --resource-group ${{ env.RG_NAME }} \
             --nsg-name ${{ env.NSG_NAME }} \
-            --name Allow-GitHub-Actions \
-            --yes
+            --name Allow-GitHub-Actions
