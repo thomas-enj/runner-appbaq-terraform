@@ -18,9 +18,21 @@ provider "azurerm" {
   resource_providers_to_register = ["Microsoft.Compute", "Microsoft.Network"]
 }
 
+locals {
+  tags = merge(
+    {
+      managed_by  = "terraform"
+      environment = "non-production"
+      owner       = var.owner
+    },
+    var.tags
+  )
+}
+
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
+  tags     = local.tags
 }
 
 resource "azurerm_virtual_network" "vnet" {
@@ -28,6 +40,7 @@ resource "azurerm_virtual_network" "vnet" {
   address_space       = ["10.0.0.0/16"]
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
+  tags                = local.tags
 }
 
 module "network" {
@@ -36,6 +49,7 @@ module "network" {
   location            = azurerm_resource_group.rg.location
   vnet_name           = azurerm_virtual_network.vnet.name
   admin_ip            = var.admin_ip
+  tags                = local.tags
 }
 
 module "compute" {
@@ -44,4 +58,5 @@ module "compute" {
   location            = azurerm_resource_group.rg.location
   nic_id              = module.network.nic_id
   vm_size             = var.vm_size
+  tags                = local.tags
 }

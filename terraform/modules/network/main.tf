@@ -20,12 +20,14 @@ resource "azurerm_public_ip" "runner_pip" {
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
+  tags                = var.tags
 }
 
 resource "azurerm_network_security_group" "runner_nsg" {
   name                = "nsg-runner"
   location            = var.location
   resource_group_name = var.resource_group_name
+  tags                = var.tags
 
   security_rule {
     name                       = "Allow-SSH-Admin"
@@ -44,6 +46,7 @@ resource "azurerm_network_interface" "runner_nic" {
   name                = "nic-runner"
   location            = var.location
   resource_group_name = var.resource_group_name
+  tags                = var.tags
 
   ip_configuration {
     name                          = "internal"

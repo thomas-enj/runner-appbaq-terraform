@@ -18,3 +18,9 @@ variable "vm_size" {
   default     = "Standard_D2s_v3"
   description = "Size of the Virtual Machine"
 }
+
+variable "tags" {
+  type        = map(string)
+  default     = {}
+  description = "Tags to apply to the runner VM"
+}

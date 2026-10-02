@@ -23,6 +23,7 @@ resource "azurerm_linux_virtual_machine" "runner_vm" {
   size                  = var.vm_size
   admin_username        = "azureuser"
   network_interface_ids = [var.nic_id]
+  tags                  = var.tags
 
   admin_ssh_key {
     username   = "azureuser"

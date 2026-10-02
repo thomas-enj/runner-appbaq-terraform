@@ -26,3 +26,14 @@ variable "vm_size" {
   default     = "Standard_D2s_v3"
   description = "Size of the Virtual Machine"
 }
+
+variable "owner" {
+  type        = string
+  description = "Owner of the Azure resources"
+}
+
+variable "tags" {
+  type        = map(string)
+  default     = {}
+  description = "Additional tags, overriding the default tags when keys match"
+}
