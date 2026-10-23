@@ -20,7 +20,7 @@ fi
 
 RG_EXISTS="$(az group exists --name "$RG_BACKEND" --output tsv)"
 if [[ "$RG_EXISTS" == "false" ]]; then
-  az group create --name "$RG_BACKEND" --location "$LOCATION" --output none
+  az group create --name "$RG_BACKEND" --location "$LOCATION" --tags managed_by=terraform --output none
 elif [[ "$RG_EXISTS" != "true" ]]; then
   printf '%s\n' "Unable to determine whether the backend resource group exists." >&2
   exit 1
@@ -37,8 +37,21 @@ if [[ -z "$EXISTING_ACCOUNT" ]]; then
     --resource-group "$RG_BACKEND" \
     --location "$LOCATION" \
     --sku Standard_LRS \
+    --tags managed_by=terraform \
     --output none
 fi
+
+BACKEND_ACCOUNT_ID="$(az storage account show \
+  --name "$SA_BACKEND" \
+  --resource-group "$RG_BACKEND" \
+  --query id \
+  --output tsv)"
+
+az tag update \
+  --resource-id "$BACKEND_ACCOUNT_ID" \
+  --operation Merge \
+  --tags managed_by=terraform \
+  --output none
 
 az storage container create \
   --name "$CONTAINER_BACKEND" \

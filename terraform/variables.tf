@@ -34,5 +34,5 @@ variable "owner" {
 variable "tags" {
   type        = map(string)
   default     = {}
-  description = "Additional tags, overriding the default tags when keys match"
+  description = "Additional tags, overriding defaults except managed_by, which is always terraform"
 }
