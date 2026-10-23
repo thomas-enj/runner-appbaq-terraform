@@ -2,11 +2,6 @@ name: Runner - Destroy
 
 on:
   workflow_dispatch:
-    inputs:
-      confirmation:
-        description: "Type DESTROY to confirm runner destruction"
-        type: string
-        required: true
 
 concurrency:
   group: runner-terraform-${{ vars.TF_OWNER }}
@@ -28,11 +23,10 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
-  destroy:
-    name: Terraform Destroy
+  destroy-plan:
+    name: Terraform Destroy Plan
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    environment: tf-destroy
     permissions:
       contents: read
       id-token: write
@@ -43,15 +37,9 @@ jobs:
       - name: Checkout Terraform repository
         uses: actions/checkout@v7.0.1
 
-      - name: Validate confirmation and GitHub variables
+      - name: Validate GitHub variables
         shell: bash
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
-          if [[ "$CONFIRMATION" != "DESTROY" ]]; then
-            echo "::error::Type DESTROY to confirm runner destruction."
-            exit 1
-          fi
           if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
             echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
             exit 1
@@ -84,6 +72,58 @@ jobs:
         run: terraform validate -no-color
 
       - name: Terraform Destroy Plan
+        shell: bash
+        run: |
+          terraform plan -destroy -input=false -no-color -lock-timeout=5m | tee destroy-plan.txt
+          {
+            printf '## Runner destruction plan\n\nReview this plan before approving tf-destroy.\n\n```text\n'
+            cat destroy-plan.txt
+            printf '\n```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    name: Terraform Destroy
+    needs: destroy-plan
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: tf-destroy
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - name: Checkout Terraform repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -input=false \
+            -backend-config="resource_group_name=${RG_NAME}" \
+            -backend-config="storage_account_name=${SA_BACKEND}" \
+            -backend-config="container_name=tfstate-appbaq" \
+            -backend-config="key=${OWNER}.runner.terraform.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      - name: Refresh Terraform Destroy Plan after approval
         run: terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=destroy.tfplan
 
       - name: Terraform Destroy
