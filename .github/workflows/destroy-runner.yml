@@ -2,11 +2,6 @@ name: Runner - Destroy
 
 on:
   workflow_dispatch:
-    inputs:
-      confirmation:
-        description: "Type DESTROY to confirm runner destruction"
-        type: string
-        required: true
 
 concurrency:
   group: runner-terraform-${{ vars.TF_OWNER }}
@@ -42,15 +37,9 @@ jobs:
       - name: Checkout Terraform repository
         uses: actions/checkout@v7.0.1
 
-      - name: Validate confirmation and GitHub variables
+      - name: Validate GitHub variables
         shell: bash
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
-          if [[ "$CONFIRMATION" != "DESTROY" ]]; then
-            echo "::error::Type DESTROY to confirm runner destruction."
-            exit 1
-          fi
           if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
             echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
             exit 1
