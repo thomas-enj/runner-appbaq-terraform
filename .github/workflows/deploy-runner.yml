@@ -224,12 +224,15 @@ jobs:
             --created --interval 5 --timeout 120
 
       - name: Generate GitHub Runner Registration Token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_GITHUB }}
         run: |
-          TOKEN=$(curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.PAT_GITHUB }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/thomas-enj/appbaq-infra-terraform/actions/runners/registration-token | jq -r .token)
-          echo "RUNNER_TOKEN=$TOKEN" >> $GITHUB_ENV
+          TOKEN=$(gh api --method POST \
+            repos/thomas-enj/appbaq-infra-terraform/actions/runners/registration-token \
+            | jq -er '.token | select(type == "string" and test("^[A-Za-z0-9_]+$"))')
+          echo "::add-mask::$TOKEN"
+          echo "RUNNER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Trust Runner SSH Key
         run: |
