@@ -1,23 +1,17 @@
-name: Deploy and Configure Runner
+name: Runner - Plan and Apply
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      action:
-        description: "Operation to perform"
-        type: choice
-        required: true
-        default: deploy
-        options:
-          - deploy
-          - destroy
 
 concurrency:
   group: runner-terraform-${{ vars.TF_OWNER }}
   cancel-in-progress: false
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -27,6 +21,7 @@ env:
   SA_BACKEND: ${{ vars.TF_SA_BACKEND }}
   TF_VAR_resource_group_name: ${{ vars.TF_RGROUP }}
   TF_VAR_owner: ${{ vars.TF_OWNER }}
+  TF_VAR_admin_ip: ${{ secrets.MY_ADMIN_IP }}
   OWNER: ${{ vars.TF_OWNER }}
   NSG_NAME: nsg-runner
   ARM_USE_OIDC: "true"
@@ -35,9 +30,110 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
-  provision-and-configure:
-    if: ${{ inputs.action == 'deploy' }}
+  plan:
+    name: Terraform Plan
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - name: Checkout Terraform repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Validate GitHub variables
+        shell: bash
+        run: |
+          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
+            echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
+            exit 1
+          fi
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -input=false \
+            -backend-config="resource_group_name=${RG_NAME}" \
+            -backend-config="storage_account_name=${SA_BACKEND}" \
+            -backend-config="container_name=tfstate-appbaq" \
+            -backend-config="key=${OWNER}.runner.terraform.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          if terraform plan -input=false -no-color -lock-timeout=5m > plan.txt 2>&1; then
+            cat plan.txt
+          else
+            cat plan.txt
+            exit 1
+          fi
+
+      - name: Comment PR with Terraform Plan
+        if: ${{ always() && github.event_name == 'pull_request' && (steps.plan.outcome == 'success' || steps.plan.outcome == 'failure') }}
+        uses: actions/github-script@v9
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- runner-terraform-plan -->';
+            const plan = fs.readFileSync('terraform/plan.txt');
+            const text = plan.subarray(0, 48000).toString('utf8');
+            const truncated = plan.length > 48000 ? '\nPlan truncated; see workflow logs.' : '';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `${marker}\n### Runner Terraform Plan: ${process.env.PLAN_OUTCOME}\nCommit: ${context.sha}\n\n<details><summary>Plan details</summary>\n\n\`\`\`text\n${text}\n\`\`\`\n${truncated}\n</details>\n\n[Workflow logs](${runUrl})`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: context.issue.number
+            });
+            const previous = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body?.includes(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({...context.repo, comment_id: previous.id, body});
+            } else {
+              await github.rest.issues.createComment({...context.repo, issue_number: context.issue.number, body});
+            }
+
+      - name: Check Plan Status
+        if: ${{ always() && steps.plan.outcome == 'failure' }}
+        run: exit 1
+
+  provision-and-configure:
+    name: Terraform Apply and Configure Runner
+    needs: plan
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: tf-apply
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Validate GitHub variables
         shell: bash
@@ -84,8 +180,12 @@ jobs:
         run: terraform validate
         working-directory: ${{ env.TF_WORKING_DIR }}
 
+      - name: Refresh Terraform Plan after approval
+        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
       - name: Terraform Apply
-        run: terraform apply -auto-approve -var="admin_ip=${{ secrets.MY_ADMIN_IP }}"
+        run: terraform apply -input=false -lock-timeout=5m tfplan
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Get Terraform Outputs
@@ -134,13 +234,13 @@ jobs:
       - name: Trust Runner SSH Key
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ env.RUNNER_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$RUNNER_IP" >> ~/.ssh/known_hosts
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook -i "${{ env.RUNNER_IP }}," playbook.yml \
+          ansible-playbook -i "$RUNNER_IP," playbook.yml \
             -u azureuser --private-key "$GITHUB_WORKSPACE/$TF_WORKING_DIR/runner_key.pem" \
-            -e "runner_setup_github_token=${{ env.RUNNER_TOKEN }}"
+            -e "runner_setup_github_token=$RUNNER_TOKEN"
         working-directory: ${{ env.ANSIBLE_WORKING_DIR }}
 
       - name: Close Temporary Firewall Rule
@@ -153,52 +253,3 @@ jobs:
             --nsg-name "$NSG_NAME" \
             --name Allow-GitHub-Actions \
             --deleted --interval 5 --timeout 120
-
-  destroy:
-    if: ${{ inputs.action == 'destroy' }}
-    runs-on: ubuntu-latest
-    env:
-      TF_VAR_admin_ip: ${{ secrets.MY_ADMIN_IP }}
-    steps:
-      - name: Validate GitHub variables
-        shell: bash
-        run: |
-          if [[ -z "${TF_VAR_resource_group_name//[[:space:]]/}" || -z "${TF_VAR_owner//[[:space:]]/}" || -z "${SA_BACKEND//[[:space:]]/}" || -z "${TF_VAR_admin_ip//[[:space:]]/}" ]]; then
-            echo "::error::Define TF_RGROUP, TF_OWNER, TF_SA_BACKEND and the MY_ADMIN_IP secret."
-            exit 1
-          fi
-
-      - name: Checkout Terraform repository
-        uses: actions/checkout@v7.0.1
-
-      - name: Azure Login via OIDC
-        uses: azure/login@v3.1.0
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.1
-        with:
-          terraform_version: "1.16.4"
-          terraform_wrapper: false
-
-      - name: Terraform Init
-        run: |
-          terraform init \
-            -input=false \
-            -backend-config="resource_group_name=${RG_NAME}" \
-            -backend-config="storage_account_name=${SA_BACKEND}" \
-            -backend-config="container_name=tfstate-appbaq" \
-            -backend-config="key=${OWNER}.runner.terraform.tfstate" \
-            -backend-config="use_azuread_auth=true"
-        working-directory: ${{ env.TF_WORKING_DIR }}
-
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: ${{ env.TF_WORKING_DIR }}
-
-      - name: Terraform Destroy
-        run: terraform destroy -input=false -auto-approve
-        working-directory: ${{ env.TF_WORKING_DIR }}
