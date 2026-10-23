@@ -104,18 +104,24 @@ jobs:
       - name: Open Temporary Firewall Rule
         id: firewall
         run: |
-          az network nsg rule create \
+          RULE_URL="https://management.azure.com/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.Network/networkSecurityGroups/$NSG_NAME/securityRules/Allow-GitHub-Actions?api-version=2024-05-01"
+          RULE_BODY=$(jq -n --arg source "$ACTION_IP/32" '{properties: {
+            priority: 110,
+            direction: "Inbound",
+            access: "Allow",
+            protocol: "Tcp",
+            sourcePortRange: "*",
+            destinationPortRange: "22",
+            sourceAddressPrefix: $source,
+            destinationAddressPrefix: "*"
+          }}')
+          az rest --method put --url "$RULE_URL" \
+            --headers "Content-Type=application/json" --body "$RULE_BODY" --output none
+          az network nsg rule wait \
             --resource-group "$RG_NAME" \
-            --nsg-name ${{ env.NSG_NAME }} \
+            --nsg-name "$NSG_NAME" \
             --name Allow-GitHub-Actions \
-            --priority 110 \
-            --direction Inbound \
-            --access Allow \
-            --protocol Tcp \
-            --source-port-range "*" \
-            --destination-port-range 22 \
-            --source-address-prefix ${{ env.ACTION_IP }}/32 \
-            --destination-address-prefix "*"
+            --created --interval 5 --timeout 120
 
       - name: Generate GitHub Runner Registration Token
         run: |
@@ -140,10 +146,13 @@ jobs:
       - name: Close Temporary Firewall Rule
         if: ${{ always() && (steps.firewall.outcome == 'success' || steps.firewall.outcome == 'failure') }}
         run: |
-          az network nsg rule delete \
+          RULE_URL="https://management.azure.com/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/Microsoft.Network/networkSecurityGroups/$NSG_NAME/securityRules/Allow-GitHub-Actions?api-version=2024-05-01"
+          az rest --method delete --url "$RULE_URL" --output none
+          az network nsg rule wait \
             --resource-group "$RG_NAME" \
-            --nsg-name ${{ env.NSG_NAME }} \
-            --name Allow-GitHub-Actions
+            --nsg-name "$NSG_NAME" \
+            --name Allow-GitHub-Actions \
+            --deleted --interval 5 --timeout 120
 
   destroy:
     if: ${{ inputs.action == 'destroy' }}
